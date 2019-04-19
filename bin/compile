@@ -41,6 +41,7 @@ TOR_DIST_URL=https://www.torproject.org/dist/
 TOR_SIG_NAME=${TOR_SRC_NAME}.asc
 TOR_SRC_URL=${TOR_DIST_URL}${TOR_SRC_NAME}
 TOR_SRC_SIG_URL=${TOR_DIST_URL}${TOR_SIG_NAME}
+TOR_BUILD_DIR_NAME=tor
 
 # Downloading and Compiling Tor
 mkdir -p $CACHE_DIR
@@ -68,27 +69,29 @@ if ! [ -e $CACHE_DIR/$TOR_SIG_NAME ]; then
   fi
 fi
 
-topic "Compiling"
-tar -zxf $CACHE_DIR/$TOR_SRC_NAME
-cd tor-$TOR_VER
-./configure --prefix=$CACHE_DIR/tor
-if [ $? -ne 0 ]; then
-  error "FAILED to configure for compliation"
-fi
-
-make install
-if [ $? -ne 0 ]; then
-  error "FAILED to run make install"
+if ! [ -e $CACHE_DIR/$TOR_BUILD_DIR_NAME ]; then
+  topic "Compiling"
+  tar -zxf $CACHE_DIR/$TOR_SRC_NAME
+  cd tor-$TOR_VER
+  ./configure --prefix=$CACHE_DIR/$TOR_BUILD_DIR_NAME
+  if [ $? -ne 0 ]; then
+    error "FAILED to configure for compliation"
+  fi
+  
+  make install
+  if [ $? -ne 0 ]; then
+    error "FAILED to run make install"
+  fi
 fi
 
 # Installing Tor
 topic "Installing Tor"
 
 # Cached instalation to real build dir
-cp -r $CACHE_DIR/tor $BUILD_DIR
+cp -r $CACHE_DIR/$TOR_BUILD_DIR_NAME $BUILD_DIR
 
 topic "Setting commands"
-cat > $BUILD_DIR/tor/bin/$RUN_COMMAND <<EOF
+cat > $BUILD_DIR/$TOR_BUILD_DIR_NAME/bin/$RUN_COMMAND <<EOF
 #!/usr/bin/env bash
 
 mkdir -p "${HOME}/hidden_service"
@@ -107,4 +110,4 @@ $HOME/tor/bin/tor -f $HOME/tor/etc/tor/torrc &
 exec \$*
 EOF
 
-chmod a+x $BUILD_DIR/tor/bin/$RUN_COMMAND
+chmod a+x $BUILD_DIR/$TOR_BUILD_DIR_NAME/bin/$RUN_COMMAND
