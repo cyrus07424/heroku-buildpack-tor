@@ -1,0 +1,110 @@
+#!/usr/bin/env bash
+# bin/compile <build-dir> <cache-dir>
+
+# fail fast
+#set -e
+
+# debug
+set -x
+
+# parse and derive params
+BUILD_DIR=$1
+CACHE_DIR=$2
+ENV_DIR=$3
+
+LP_DIR=`cd $(dirname $0); cd ..; pwd`
+
+function error() {
+  echo " !     $*" >&2
+  exit 1
+}
+
+function topic() {
+  echo "-----> $*"
+}
+
+function indent() {
+  c='s/^/       /'
+  case $(uname) in
+    Darwin) sed -l "$c";;
+    *)      sed -u "$c";;
+  esac
+}
+
+# config
+TOR_VER=0.3.5.8
+
+# Buildpack URL
+RUN_COMMAND=run_tor
+TOR_SRC_NAME=tor-${TOR_VER}.tar.gz
+TOR_DIST_URL=https://www.torproject.org/dist/
+TOR_SIG_NAME=${TOR_SRC_NAME}.asc
+TOR_SRC_URL=${TOR_DIST_URL}${TOR_SRC_NAME}
+TOR_SRC_SIG_URL=${TOR_DIST_URL}${TOR_SIG_NAME}
+
+# Downloading and Compiling Tor
+mkdir -p $CACHE_DIR
+if ! [ -e $CACHE_DIR/$TOR_SRC_NAME ]; then
+  topic "Downloading ${TOR_SRC_URL}"
+  curl $TOR_SRC_URL -L -o $CACHE_DIR/$TOR_SRC_NAME
+  if [ $? - ne 0]; then
+    error "FAILED to obtain ${TOR_SRC_URL}"
+  fi
+fi
+
+if ! [ -e $CACHE_DIR/$TOR_SIG_NAME ]; then
+  topic "Downloading ${TOR_SRC_SIG_URL}"
+  curl $TOR_SRC_SIG_URL -L -o $CACHE_DIR/$TOR_SIG_NAME
+  if [ $? -ne 0 ]; then
+    error "FAILED to obtain signature ${TOR_SRC_SIG_URL}"
+  fi
+
+  topic "Verify Integrity"
+  gpg --keyserver pool.sks-keyservers.net --recv-keys 0x4E2C6E8793298290
+  gpg --keyserver pool.sks-keyservers.net --recv-keys 0x6AFEE6D49E92B601
+  gpg --verify $CACHE_DIR/$TOR_SIG_NAME $CACHE_DIR/$TOR_SRC_NAME | grep -c "Good signature"
+  if [ $? -lt 1 ]; then
+    error "FAILED to verify the signature"
+  fi
+fi
+
+topic "Compiling"
+tar -zxf $CACHE_DIR/$TOR_SRC_NAME
+cd tor-$TOR_VER
+./configure --prefix=$CACHE_DIR/tor
+if [ $? -ne 0 ]; then
+  error "FAILED to configure for compliation"
+fi
+
+make install
+if [ $? -ne 0 ]; then
+  error "FAILED to run make install"
+fi
+
+# Installing Tor
+topic "Installing Tor"
+
+# Cached instalation to real build dir
+cp -r $CACHE_DIR/tor $BUILD_DIR
+
+topic "Setting commands"
+cat > $BUILD_DIR/tor/bin/$RUN_COMMAND <<EOF
+#!/usr/bin/env bash
+
+mkdir -p "${HOME}/hidden_service"
+
+echo "Setting up hidden service"
+cat > ${HOME}/hidden_service/private_key <<EPK
+\${HIDDEN_PRIVATE_KEY}
+EPK
+echo \${HIDDEN_DOT_ONION} > ${HOME}/hidden_service/hostname
+
+echo "HiddenServiceDir ${HOME}/hidden_service/" > $HOME/tor/etc/tor/torrc
+echo "HiddenServicePort 80 127.0.0.1:\${PORT}" >> $HOME/tor/etc/tor/torrc
+
+# Use -f to be safe here.
+$HOME/tor/bin/tor -f $HOME/tor/etc/tor/torrc &
+exec \$*
+EOF
+
+chmod a+x $BUILD_DIR/tor/bin/$RUN_COMMAND
