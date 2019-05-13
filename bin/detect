@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# bin/detect <build-dir>
 
 echo "Tor hidden service"
 exit 0
